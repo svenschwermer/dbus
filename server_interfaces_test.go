@@ -225,7 +225,7 @@ func newTester() (*tester, error) {
 		conn.Close()
 		return nil, err
 	}
-	tester.conn = conn
+	tester.conn = conn.Conn
 	return tester, nil
 }
 
@@ -429,7 +429,6 @@ type X struct {
 func (x *X) Method1() *Error {
 	return nil
 }
-
 
 func TestRaceInExport(t *testing.T) {
 	const (

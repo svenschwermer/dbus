@@ -50,8 +50,12 @@ type Auth interface {
 // mechanisms (in that order). If nil is passed, the EXTERNAL and
 // DBUS_COOKIE_SHA1 mechanisms are tried for the current user. For private
 // connections, this method must be called before sending any messages to the
-// bus. Auth must not be called on shared connections.
-func (conn *Conn) Auth(methods []Auth) error {
+// bus.
+func (conn *PrivateConn) Auth(methods []Auth) error {
+	return conn.auth(methods)
+}
+
+func (conn *Conn) auth(methods []Auth) error {
 	if methods == nil {
 		uid := strconv.Itoa(os.Getuid())
 		methods = []Auth{AuthExternal(uid), AuthCookieSha1(uid, getHomeDir())}

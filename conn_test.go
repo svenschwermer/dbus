@@ -225,7 +225,7 @@ func BenchmarkServe(b *testing.B) {
 	if err = cli.Hello(); err != nil {
 		b.Fatal(err)
 	}
-	benchmarkServe(b, srv, cli)
+	benchmarkServe(b, srv, cli.Conn)
 }
 
 func BenchmarkServeAsync(b *testing.B) {
@@ -244,7 +244,7 @@ func BenchmarkServeAsync(b *testing.B) {
 	if err = cli.Hello(); err != nil {
 		b.Fatal(err)
 	}
-	benchmarkServeAsync(b, srv, cli)
+	benchmarkServeAsync(b, srv, cli.Conn)
 }
 
 func BenchmarkServeSameConn(b *testing.B) {

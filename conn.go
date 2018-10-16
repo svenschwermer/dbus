@@ -24,10 +24,6 @@ var ErrClosed = errors.New("dbus: connection closed by user")
 // Conn represents a connection to a message bus (usually, the system or
 // session bus).
 //
-// Connections are either shared or private. Shared connections
-// are shared between calls to the functions that return them. As a result,
-// the methods Close, Auth and Hello must not be called on them.
-//
 // Multiple goroutines may invoke methods on a connection simultaneously.
 type Conn struct {
 	transport
@@ -52,33 +48,33 @@ type Conn struct {
 	eavesdroppedLck sync.Mutex
 }
 
+// PrivateConn extends the Conn interface with methods that are only allowed to
+// be called for private connections, i.e. not for connections returned by
+// SessionBus and SystemBus.
+type PrivateConn struct{ *Conn }
+
 // SessionBus returns a shared connection to the session bus, connecting to it
 // if not already done.
-func SessionBus() (conn *Conn, err error) {
+func SessionBus() (*Conn, error) {
 	sessionBusLck.Lock()
 	defer sessionBusLck.Unlock()
 	if sessionBus != nil {
 		return sessionBus, nil
 	}
-	defer func() {
-		if conn != nil {
-			sessionBus = conn
-		}
-	}()
-	conn, err = SessionBusPrivate()
+	conn, err := SessionBusPrivate()
 	if err != nil {
-		return
+		return nil, err
 	}
 	if err = conn.Auth(nil); err != nil {
 		conn.Close()
-		conn = nil
-		return
+		return nil, err
 	}
 	if err = conn.Hello(); err != nil {
 		conn.Close()
-		conn = nil
+		return nil, err
 	}
-	return
+	sessionBus = conn.Conn
+	return sessionBus, nil
 }
 
 func getSessionBusAddress() (string, error) {
@@ -92,7 +88,7 @@ func getSessionBusAddress() (string, error) {
 }
 
 // SessionBusPrivate returns a new private connection to the session bus.
-func SessionBusPrivate() (*Conn, error) {
+func SessionBusPrivate() (*PrivateConn, error) {
 	address, err := getSessionBusAddress()
 	if err != nil {
 		return nil, err
@@ -102,7 +98,7 @@ func SessionBusPrivate() (*Conn, error) {
 }
 
 // SessionBusPrivate returns a new private connection to the session bus.
-func SessionBusPrivateHandler(handler Handler, signalHandler SignalHandler) (*Conn, error) {
+func SessionBusPrivateHandler(handler Handler, signalHandler SignalHandler) (*PrivateConn, error) {
 	address, err := getSessionBusAddress()
 	if err != nil {
 		return nil, err
@@ -112,45 +108,40 @@ func SessionBusPrivateHandler(handler Handler, signalHandler SignalHandler) (*Co
 
 // SystemBus returns a shared connection to the system bus, connecting to it if
 // not already done.
-func SystemBus() (conn *Conn, err error) {
+func SystemBus() (*Conn, error) {
 	systemBusLck.Lock()
 	defer systemBusLck.Unlock()
 	if systemBus != nil {
 		return systemBus, nil
 	}
-	defer func() {
-		if conn != nil {
-			systemBus = conn
-		}
-	}()
-	conn, err = SystemBusPrivate()
+	conn, err := SystemBusPrivate()
 	if err != nil {
-		return
+		return nil, err
 	}
 	if err = conn.Auth(nil); err != nil {
 		conn.Close()
-		conn = nil
-		return
+		return nil, err
 	}
 	if err = conn.Hello(); err != nil {
 		conn.Close()
-		conn = nil
+		return nil, err
 	}
-	return
+	systemBus = conn.Conn
+	return systemBus, nil
 }
 
 // SystemBusPrivate returns a new private connection to the system bus.
-func SystemBusPrivate() (*Conn, error) {
+func SystemBusPrivate() (*PrivateConn, error) {
 	return Dial(getSystemBusPlatformAddress())
 }
 
 // SystemBusPrivateHandler returns a new private connection to the system bus, using the provided handlers.
-func SystemBusPrivateHandler(handler Handler, signalHandler SignalHandler) (*Conn, error) {
+func SystemBusPrivateHandler(handler Handler, signalHandler SignalHandler) (*PrivateConn, error) {
 	return DialHandler(getSystemBusPlatformAddress(), handler, signalHandler)
 }
 
 // Dial establishes a new private connection to the message bus specified by address.
-func Dial(address string) (*Conn, error) {
+func Dial(address string) (*PrivateConn, error) {
 	tr, err := getTransport(address)
 	if err != nil {
 		return nil, err
@@ -159,7 +150,7 @@ func Dial(address string) (*Conn, error) {
 }
 
 // DialHandler establishes a new private connection to the message bus specified by address, using the supplied handlers.
-func DialHandler(address string, handler Handler, signalHandler SignalHandler) (*Conn, error) {
+func DialHandler(address string, handler Handler, signalHandler SignalHandler) (*PrivateConn, error) {
 	tr, err := getTransport(address)
 	if err != nil {
 		return nil, err
@@ -168,17 +159,17 @@ func DialHandler(address string, handler Handler, signalHandler SignalHandler) (
 }
 
 // NewConn creates a new private *Conn from an already established connection.
-func NewConn(conn io.ReadWriteCloser) (*Conn, error) {
+func NewConn(conn io.ReadWriteCloser) (*PrivateConn, error) {
 	return NewConnHandler(conn, NewDefaultHandler(), NewDefaultSignalHandler())
 }
 
 // NewConnHandler creates a new private *Conn from an already established connection, using the supplied handlers.
-func NewConnHandler(conn io.ReadWriteCloser, handler Handler, signalHandler SignalHandler) (*Conn, error) {
+func NewConnHandler(conn io.ReadWriteCloser, handler Handler, signalHandler SignalHandler) (*PrivateConn, error) {
 	return newConn(genericTransport{conn}, handler, signalHandler)
 }
 
 // newConn creates a new *Conn from a transport.
-func newConn(tr transport, handler Handler, signalHandler SignalHandler) (*Conn, error) {
+func newConn(tr transport, handler Handler, signalHandler SignalHandler) (*PrivateConn, error) {
 	conn := new(Conn)
 	conn.transport = tr
 	conn.calls = newCallTracker()
@@ -188,7 +179,7 @@ func newConn(tr transport, handler Handler, signalHandler SignalHandler) (*Conn,
 	conn.serialGen = newSerialGenerator()
 	conn.names = newNameTracker()
 	conn.busObj = conn.Object("org.freedesktop.DBus", "/org/freedesktop/DBus")
-	return conn, nil
+	return &PrivateConn{conn}, nil
 }
 
 // BusObject returns the object owned by the bus daemon which handles
@@ -198,9 +189,12 @@ func (conn *Conn) BusObject() BusObject {
 }
 
 // Close closes the connection. Any blocked operations will return with errors
-// and the channels passed to Eavesdrop and Signal are closed. This method must
-// not be called on shared connections.
-func (conn *Conn) Close() error {
+// and the channels passed to Eavesdrop and Signal are closed.
+func (conn *PrivateConn) Close() error {
+	return conn.close()
+}
+
+func (conn *Conn) close() error {
 	conn.outHandler.close()
 	if term, ok := conn.signalHandler.(Terminator); ok {
 		term.Terminate()
@@ -240,8 +234,12 @@ func (conn *Conn) getSerial() uint32 {
 
 // Hello sends the initial org.freedesktop.DBus.Hello call. This method must be
 // called after authentication, but before sending any other messages to the
-// bus. Hello must not be called for shared connections.
-func (conn *Conn) Hello() error {
+// bus.
+func (conn *PrivateConn) Hello() error {
+	return conn.hello()
+}
+
+func (conn *Conn) hello() error {
 	var s string
 	err := conn.busObj.Call("org.freedesktop.DBus.Hello", 0).Store(&s)
 	if err != nil {
